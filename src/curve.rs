@@ -15,17 +15,17 @@ use std::{
 
 use kwik::{
 	math,
+	FileWriter,
 	csv_writer::{
-		FileWriter,
 		CsvWriter,
-		CsvRow as WriterCsvRow,
 		Row as WriterRow,
+		RowData as CsvWriterRowData,
 	},
 	csv_reader::{
 		FileReader,
 		CsvReader,
-		CsvRow as ReaderCsvRow,
 		Row as ReaderRow,
+		RowData as CsvReaderRowData,
 	},
 };
 
@@ -223,7 +223,7 @@ impl Point {
 }
 
 impl WriterRow for Point {
-	fn as_row(&self, row: &mut WriterCsvRow) -> Result<(), Error> {
+	fn as_row(&self, row: &mut CsvWriterRowData) -> Result<(), Error> {
 		row.push(&self.size.to_string());
 		row.push(&self.miss_ratio.to_string());
 
@@ -232,7 +232,7 @@ impl WriterRow for Point {
 }
 
 impl ReaderRow for Point {
-	fn new(row: &ReaderCsvRow) -> Result<Self, Error> where Self: Sized {
+	fn new(row: &CsvReaderRowData) -> Result<Self, Error> where Self: Sized {
 		let Ok(size) = row.get(0)?.parse::<u64>() else {
 			return Err(Error::new(
 				ErrorKind::InvalidData,
