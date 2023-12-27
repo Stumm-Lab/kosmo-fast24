@@ -1,0 +1,29 @@
+[package]
+name = "kosmo-fast24"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+byteorder = "1.4.3"
+dlv-list = "0.5.1"
+fasthash = "0.4.0"
+gnuplot = "0.0.38"
+kwik = { git = "https://github.com/KiaShakiba/kwik-rs.git", version = "0.1.0" }
+rayon = "1.7.0"
+rustc-hash = "1.1.0"
+serde = { version = "1.0.163", features = ["derive"] }
+clap = { version = "4.2.7", features = ["derive"] }
+
+[[bin]]
+name = "wss"
+path = "src/wss.rs"
+
+[[bin]]
+name = "accurate"
+path = "src/accurate.rs"
+
+[[bin]]
+name = "mrc"
+path = "src/mrc.rs"
