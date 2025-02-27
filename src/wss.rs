@@ -9,7 +9,8 @@
 
 mod access;
 
-use rustc_hash::FxHashSet;
+use std::cmp;
+use rustc_hash::FxHashMap;
 use clap::Parser;
 use crate::access::{Access, Key};
 
@@ -17,6 +18,7 @@ use kwik::{
 	FileReader,
 	binary_reader::{BinaryReader, SizedChunk},
 	progress::{Progress, Tag},
+  fmt,
 };
 
 #[derive(Parser)]
@@ -40,16 +42,29 @@ fn main() {
 		Tag::Time,
 	]);
 
-	let mut set = FxHashSet::<Key>::default();
+	let mut map = FxHashMap::<Key, u64>::default();
 	let mut wss: u64 = 0;
+	// This is the WSS based on the first seen size of an object.
+	let mut naive_wss: u64 = 0;
 
 	while let Some(access) = reader.read_chunk() {
-		if access.is_valid_self_populating() && set.insert(access.key) {
-			wss += access.size as u64;
+		if !access.is_valid_self_populating() {
+			progress.tick(Access::SIZE);
+			continue;
 		}
 
+		if let Some(value) = map.get_mut(&access.key) {
+			let max = cmp::max(*value, access.size as u64);
+			wss = wss - *value + max;
+			*value = max;
+		} else {
+			map.insert(access.key, access.size as u64);
+			wss += access.size as u64;
+			naive_wss += access.size as u64;
+		}
 		progress.tick(Access::SIZE);
 	}
 
-	println!("WSS: {wss}");
+	println!("WSS: {wss} [bytes] ({})", fmt::memory(wss, Some(2)));
+	println!("Naive WSS: {naive_wss} [bytes] ({})", fmt::memory(naive_wss, Some(2)));
 }
