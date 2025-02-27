@@ -18,6 +18,7 @@ use kwik::{
 	FileReader,
 	binary_reader::{BinaryReader, SizedChunk},
 	progress::{Progress, Tag},
+  fmt,
 };
 
 #[derive(Parser)]
@@ -64,6 +65,6 @@ fn main() {
 		progress.tick(Access::SIZE);
 	}
 
-	println!("WSS: {wss}");
-	println!("Naive WSS: {naive_wss}");
+	println!("WSS: {wss} [bytes] ({})", fmt::memory(wss, Some(2)));
+	println!("Naive WSS: {naive_wss} [bytes] ({})", fmt::memory(naive_wss, Some(2)));
 }
