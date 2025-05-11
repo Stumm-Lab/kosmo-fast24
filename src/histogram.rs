@@ -10,11 +10,14 @@ use crate::shards::Shards;
 
 pub const BUCKET_SIZE: u64 = 64 * 1024;
 
+/// A histogram of stack distances.
 pub struct Histogram {
 	infinity: Bucket,
 	buckets: Vec<Bucket>,
 }
 
+/// A bucket of the histogram, reducing the granularity of
+/// counters to save memory.
 pub struct Bucket {
 	size: u64,
 	count: f64,
@@ -23,6 +26,7 @@ pub struct Bucket {
 }
 
 impl Histogram {
+	/// Constructs a new, empty histogram.
 	pub fn new(shards: Option<&dyn Shards>) -> Self {
 		let shards_global_t = shards.map(|shards| shards.get_global_t());
 
@@ -32,15 +36,18 @@ impl Histogram {
 		}
 	}
 
+	/// Returns `true` if the histogram is empty.
 	pub fn is_empty(&self) -> bool {
 		self.buckets.is_empty()
 	}
 
+	/// Clears the histogram.
 	pub fn clear(&mut self) {
 		self.infinity.clear();
 		self.buckets.clear();
 	}
 
+	/// Increments a histogram bucket.
 	pub fn increment(
 		&mut self,
 		shards: Option<&dyn Shards>,
@@ -86,12 +93,14 @@ impl Histogram {
 		}
 	}
 
+	/// Scales the buckets, if necessary, with SHARDS
 	pub fn rescale_buckets(&mut self, shards: &dyn Shards) {
 		for bucket in &mut self.buckets {
 			bucket.rescale(shards.get_global_t());
 		}
 	}
 
+	/// Returns the total bucket counts.
 	pub fn get_total(&self) -> f64 {
 		let mut total: f64 = self.infinity.get_count();
 
@@ -102,6 +111,8 @@ impl Histogram {
 		total
 	}
 
+	/// Applies the adjusted SHARDS correction to the histogram
+	/// bucket counts.
 	pub fn get_corrected_total(&self, shards: &dyn Shards) -> f64 {
 		let mut total: f64 = self.infinity.get_count();
 
@@ -112,6 +123,7 @@ impl Histogram {
 		total + shards.get_correction() as f64
 	}
 
+	/// Removes any histogram buckets greater than the supplied size.
 	pub fn resize(&mut self, size: u64) {
 		self.buckets.retain(|bucket| bucket.get_size() <= size);
 	}

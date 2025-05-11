@@ -16,7 +16,10 @@ mod cache;
 use clap::Parser;
 
 use kwik::{
-	binary_reader::{FileReader, BinaryReader, SizedChunk},
+	file::{
+		FileReader,
+		binary::{BinaryReader, SizedChunk},
+	},
 	progress::{Progress, Tag},
 };
 
@@ -46,35 +49,35 @@ fn main() {
 	let args = Args::parse();
 
 	let mut curve = Curve::default();
-
 	let step_size = if args.wss > 100 { args.wss / 100 } else { 1 };
 
 	let cache_sizes = (step_size..=args.wss)
 		.step_by(step_size as usize)
 		.collect::<Vec<u64>>();
 
-	let Ok(reader) = BinaryReader::<Access>::new(&args.path) else {
+	let Ok(reader) = BinaryReader::<Access>::from_path(&args.path) else {
 		panic!("Invalid path.");
 	};
 
 	println!("{}", args.path);
 
-	let mut progress = Progress::new(reader.size() * cache_sizes.len() as u64, &[
-		Tag::Tps,
-		Tag::Eta,
-		Tag::Time,
-	]);
+	let mut progress = Progress::new(reader.size() * cache_sizes.len() as u64)
+		.with_tag(Tag::Tps)
+		.with_tag(Tag::Eta)
+		.with_tag(Tag::Time);
 
+	// Loop through all cache sizes individually and simulate them one-by-one.
+	// We could do this in parallel, but the memory overhead is too large.
 	for cache_size in &cache_sizes {
 		let mut cache = args.policy.new_cache(*cache_size);
 
-		let Ok(mut reader) = BinaryReader::<Access>::new(&args.path) else {
+		let Ok(reader) = BinaryReader::<Access>::from_path(&args.path) else {
 			panic!("Invalid path.");
 		};
 
 		let mut count: u64 = 0;
 
-		while let Some(mut access) = reader.read_chunk() {
+		for mut access in reader {
 			if access.is_valid_self_populating() {
 				access.timestamp = count + 1;
 				count += 1;
@@ -82,7 +85,7 @@ fn main() {
 				cache.handle_self_populating(&access);
 			}
 
-			progress.tick(Access::SIZE);
+			progress.tick(Access::chunk_size());
 		}
 
 		curve.add(cache.size(), cache.miss_ratio());

@@ -17,6 +17,7 @@ use crate::{
 
 const NUM_CACHES: u32 = 100;
 
+/// The MiniSim MRC generation algorithm.
 pub struct Minisimulations {
 	max_cache_size: u64,
 	caches: Vec<Box<dyn Cache>>,

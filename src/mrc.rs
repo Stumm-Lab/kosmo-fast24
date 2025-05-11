@@ -10,7 +10,6 @@
 mod access;
 mod algorithm;
 mod histogram;
-mod figure;
 mod curve;
 mod curve_plot;
 mod shards;
@@ -22,11 +21,14 @@ use std::time::Instant;
 use clap::{Parser, ValueEnum};
 
 use kwik::{
-	mem,
 	fmt,
-	FileReader,
-	binary_reader::{BinaryReader, SizedChunk},
+	sys::mem,
+	file::{
+		FileReader,
+		binary::{BinaryReader, SizedChunk},
+	},
 	progress::{Progress, Tag},
+	plot::Figure,
 };
 
 use crate::{
@@ -36,7 +38,6 @@ use crate::{
 	cache::CachePolicy,
 	kosmo::{Kosmo, KosmoPolicy},
 	minisimulations::Minisimulations,
-	figure::Figure,
 	curve::Curve,
 	curve_plot::CurvePlot,
 };
@@ -90,16 +91,15 @@ fn main() {
 		(None, None) => panic!("You must configure at one of Kosmo or MiniSim."),
 	};
 
-	let mut reader = BinaryReader::<Access>::new(&args.path)
+	let reader = BinaryReader::<Access>::from_path(&args.path)
 		.expect("Invalid trace path.");
 
 	println!("{}", args.path);
 
-	let mut progress = Progress::new(reader.size(), &[
-		Tag::Tps,
-		Tag::Eta,
-		Tag::Time,
-	]);
+	let mut progress = Progress::new(reader.size())
+		.with_tag(Tag::Tps)
+		.with_tag(Tag::Eta)
+		.with_tag(Tag::Time);
 
 	if args.run_type == RunType::Memory {
 		mem::clear(None).expect("Could not clear memory refs.");
@@ -113,7 +113,7 @@ fn main() {
 	let mut total_time: u64 = 0;
 	let mut total_accesses: u64 = 0;
 
-	while let Some(access) = reader.read_chunk() {
+	for access in reader {
 		match accesses.as_mut() {
 			Some(accesses) if accesses.len() == BATCH_SIZE => {
 				total_time += run_batch(&mut algorithm, accesses);
@@ -124,7 +124,7 @@ fn main() {
 			None => algorithm.handle(&access),
 		}
 
-		progress.tick(Access::SIZE);
+		progress.tick(Access::chunk_size());
 		total_accesses += 1;
 	}
 
@@ -139,8 +139,8 @@ fn main() {
 			.expect("Could not find accurate curve.")
 	});
 
-	let mut figure = Figure::new(1);
-	let mut plot = CurvePlot::default();
+	let mut figure = Figure::default();
+	let mut curve_plot = CurvePlot::default();
 
 	let curve = algorithm.curve();
 
@@ -148,12 +148,13 @@ fn main() {
 		println!("MAE: {}", accurate_curve.mae(&curve));
 	}
 
-	let algorithm_id = match args.kosmo_policy.is_some() {
-		true => "Kosmo",
-		false => "MiniSim",
+	let algorithm_id = if args.kosmo_policy.is_some() {
+		"Kosmo"
+	} else {
+		"MiniSim"
 	};
 
-	plot.add(algorithm_id, &curve);
+	curve_plot.add(curve, Some(algorithm_id));
 
 	match args.run_type {
 		RunType::Memory => {
@@ -176,7 +177,7 @@ fn main() {
 		},
 	}
 
-	figure.add(&mut plot);
+	figure.add(curve_plot.to_plot());
 
 	figure
 		.save(&args.output)

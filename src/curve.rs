@@ -6,7 +6,7 @@
  */
 
 use std::{
-	io::{Error, ErrorKind},
+	io,
 	collections::BTreeMap,
 	collections::btree_map::Values,
 	ops::Bound,
@@ -15,17 +15,10 @@ use std::{
 
 use kwik::{
 	math,
-	FileWriter,
-	csv_writer::{
-		CsvWriter,
-		Row as WriterRow,
-		RowData as CsvWriterRowData,
-	},
-	csv_reader::{
+	file::{
 		FileReader,
-		CsvReader,
-		Row as ReaderRow,
-		RowData as CsvReaderRowData,
+		FileWriter,
+		csv::{CsvWriter, CsvReader, RowData, ReadRow, WriteRow},
 	},
 };
 
@@ -34,11 +27,13 @@ use crate::{
 	shards::Shards,
 };
 
+/// An MRC curve, storing the points of the MRC.
 #[derive(Clone, Default)]
 pub struct Curve {
 	points: BTreeMap<u64, Point>,
 }
 
+/// An individual point on an MRC.
 #[derive(Clone)]
 pub struct Point {
 	size: u64,
@@ -46,20 +41,24 @@ pub struct Point {
 }
 
 impl Curve {
+	/// Returns an empty MRC.
 	pub fn new() -> Self {
 		Curve {
 			points: BTreeMap::new(),
 		}
 	}
 
+	/// Returns the number of points in the MRC.
 	pub fn size(&self) -> usize {
 		self.points.len()
 	}
 
+	/// Returns `true` if the MRC is empty.
 	pub fn is_empty(&self) -> bool {
 		self.points.is_empty()
 	}
 
+	/// Constructs an MRC from the supplied histogram.
 	pub fn from_histogram(histogram: &Histogram) -> Self {
 		let mut points = BTreeMap::<u64, Point>::new();
 
@@ -80,6 +79,8 @@ impl Curve {
 		}
 	}
 
+	/// Constructs an MRC from the supplied histogram, applying
+	/// the adjusted SHARDS correction if necessary.
 	pub fn from_corrected_histogram(
 		histogram: &Histogram,
 		shards: &dyn Shards
@@ -113,6 +114,7 @@ impl Curve {
 		}
 	}
 
+	/// Returns the maximum size of the MRC.
 	pub fn get_max_size(&self) -> u64 {
 		match self.points.last_key_value() {
 			Some((size, _)) => *size,
@@ -120,15 +122,15 @@ impl Curve {
 		}
 	}
 
+	/// Returns the miss ratio at the supplied size. If an exact point
+	/// corresponding to the size does not exist, the miss ratio
+	/// of the previous point is returned. If no such point exists,
+	/// `1.0` is returned.
 	pub fn get_miss_ratio(&self, size: u64) -> f64 {
-		if self.points.is_empty() {
-			return 1.0;
-		}
-
-		let prev_cursor = self.points.upper_bound(Bound::Included(&size));
-		let next_cursor = self.points.lower_bound(Bound::Included(&size));
-
-		match (prev_cursor.key_value(), next_cursor.key_value()) {
+		match (
+			self.points.upper_bound(Bound::Included(&size)).prev(),
+			self.points.lower_bound(Bound::Included(&size)).next(),
+		) {
 			(Some((_, prev_point)), Some((next_cache_size, next_point))) => {
 				if size == *next_cache_size {
 					return next_point.get_miss_ratio();
@@ -151,11 +153,12 @@ impl Curve {
 
 			(None, None) => match self.points.last_key_value() {
 				Some((_, point)) => point.get_miss_ratio(),
-				None => 0.0,
+				None => 1.0,
 			},
 		}
 	}
 
+	/// Adds a point to the MRC.
 	pub fn add(&mut self, size: u64, miss_ratio: f64) {
 		self.points.insert(
 			size,
@@ -163,11 +166,13 @@ impl Curve {
 		);
 	}
 
+	/// Returns the mean absolute error (MAE) of the current MRC
+	/// compared to the supplied MRC.
 	pub fn mae(&self, curve: &Curve) -> f64 {
-		let max_size = math::max(&[
+		let max_size = *math::max(&[
 			self.get_max_size(),
 			curve.get_max_size(),
-		]);
+		]).unwrap();
 
 		let num_points: u64 = 100;
 		let step_size = max_size / num_points;
@@ -183,21 +188,23 @@ impl Curve {
 		total / num_points as f64
 	}
 
-	pub fn to_file(&self, path: &str) -> Result<(), Error> {
-		let mut writer = CsvWriter::<Point>::new(path)?;
+	/// Saves the MRC to a CSV file.
+	pub fn to_file(&self, path: &str) -> io::Result<()> {
+		let mut writer = CsvWriter::<Point>::from_path(path)?;
 
 		for point in self.into_iter() {
-			writer.write_row(point);
+			writer.write_row(point)?;
 		}
 
 		Ok(())
 	}
 
-	pub fn from_file(path: &str) -> Result<Curve, Error> {
+	/// Constructs an MRC from a CSV file.
+	pub fn from_file(path: &str) -> io::Result<Curve> {
 		let mut curve = Curve::default();
-		let mut reader = CsvReader::<Point>::new(path)?;
+		let reader = CsvReader::<Point>::from_path(path)?;
 
-		while let Some(point) = reader.read_row() {
+		for point in reader {
 			curve.add(point.get_size(), point.get_miss_ratio());
 		}
 
@@ -222,30 +229,15 @@ impl Point {
 	}
 }
 
-impl WriterRow for Point {
-	fn as_row(&self, row: &mut CsvWriterRowData) -> Result<(), Error> {
-		row.push(&self.size.to_string());
-		row.push(&self.miss_ratio.to_string());
+impl ReadRow for Point {
+	fn from_row(row: &RowData) -> io::Result<Self> {
+		let size = row.get(0)?
+			.parse::<u64>()
+			.expect("Invalid point size.");
 
-		Ok(())
-	}
-}
-
-impl ReaderRow for Point {
-	fn new(row: &CsvReaderRowData) -> Result<Self, Error> where Self: Sized {
-		let Ok(size) = row.get(0)?.parse::<u64>() else {
-			return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Invalid curve point size."
-			));
-		};
-
-		let Ok(miss_ratio) = row.get(1)?.parse::<f64>() else {
-			return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Invalid curve point miss ratio."
-			));
-		};
+		let miss_ratio = row.get(1)?
+			.parse::<f64>()
+			.expect("Invalid point miss ratio.");
 
 		let point = Point::new(
 			size,
@@ -253,6 +245,15 @@ impl ReaderRow for Point {
 		);
 
 		Ok(point)
+	}
+}
+
+impl WriteRow for Point {
+	fn as_row(&self, row: &mut RowData) -> io::Result<()> {
+		row.push(self.size.to_string());
+		row.push(self.miss_ratio.to_string());
+
+		Ok(())
 	}
 }
 

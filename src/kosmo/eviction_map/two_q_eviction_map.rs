@@ -245,7 +245,7 @@ mod tests {
 			command: Command::Get,
 			key: 0,
 			size: 1,
-			ttl: 0,
+			ttl: None,
 		};
 
 		let mut eviction_map = TwoQEvictionMap::new(&access, 0.25, 0.50);

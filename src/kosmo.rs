@@ -35,6 +35,7 @@ pub use crate::kosmo::policy::KosmoPolicy;
 const GRANULARITY: u32 = 10;
 const MIN_RECONSTRUCTED_STACK_SIZE: u64 = 1024;
 
+// The Kosmo MRC generation algorithm.
 pub struct Kosmo {
 	global_table: FxHashMap<Key, GlobalObject>,
 	total_size: u64,
@@ -53,12 +54,14 @@ impl Algorithm for Kosmo {
 		if max_reuse_distance.is_none() {
 			self.total_size += access.size as u64;
 
+			// add the key (which has never been seen before) to the global table
 			self.global_table.insert(access.key, GlobalObject::new(
 				access,
 				&self.policies
 			));
 		}
 
+		// the key has never been seen before, so reconstruct up to the total size
 		let simulate_size = max_reuse_distance.unwrap_or(self.total_size);
 
 		self.perform_evictions(access, simulate_size);
@@ -122,6 +125,7 @@ impl Kosmo {
 		}
 	}
 
+	/// Returns the MRC of the supplied policy, if it exists.
 	pub fn policy_curve(&mut self, policy: &KosmoPolicy) -> Option<Curve> {
 		let policy_index = find_policy_index(&self.policies, policy)?;
 
@@ -140,6 +144,8 @@ impl Kosmo {
 		Some(curve)
 	}
 
+	/// Updates the eviction policy specific histograms with the stack
+	/// distance of the access.
 	fn update_histograms(&mut self, access: &Access) -> Option<u64> {
 		match self.global_table.get_mut(&access.key) {
 			Some(global_object) => {
@@ -151,7 +157,7 @@ impl Kosmo {
 					histogram.increment(self.shards.as_deref(), *reuse_distance);
 				}
 
-				math::max(&reuse_distances)
+				*math::max(&reuse_distances).unwrap()
 			},
 
 			None => {
@@ -164,12 +170,14 @@ impl Kosmo {
 		}
 	}
 
+	/// Reconstructs the policy stacks and performs necessary evictions
+	/// to make room for the access.
 	fn perform_evictions(&mut self, access: &Access, simulate_size: u64) {
-		let step_size = math::max(&[
+		let step_size = *math::max(&[
 			MIN_RECONSTRUCTED_STACK_SIZE,
 			access.size as u64,
 			(simulate_size as f64 / self.granularity as f64).ceil() as u64
-		]) as usize;
+		]).unwrap() as usize;
 
 		if step_size > simulate_size as usize {
 			return;

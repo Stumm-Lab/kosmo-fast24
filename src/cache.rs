@@ -12,18 +12,25 @@ mod fifo_cache;
 mod two_q_cache;
 mod lrfu_cache;
 
-use crate::access::{Access, Command, Key, Size};
+use crate::access::{Access, Key, Size};
 pub use crate::cache::policy::CachePolicy;
 
+/// A cache (used by MiniSim and accurate).
 pub trait Cache: Send + Sync {
+	/// Returns the cache's size.
 	fn size(&self) -> u64;
+
+	/// Returns the cache's miss ratio.
 	fn miss_ratio(&self) -> f64;
 
 	fn increment_count(&mut self);
 	fn increment_hits(&mut self);
 
+	/// Resets the cache's counters to zero.
 	fn clear_counters(&mut self);
 
+	/// Handles one cache access, self-populating if it does not exist
+	/// (i.e., read-through).
 	fn handle_self_populating(&mut self, access: &Access) -> bool {
 		if self.get(access) {
 			return true;
@@ -34,18 +41,7 @@ pub trait Cache: Send + Sync {
 		false
 	}
 
-	fn handle_lookaside(&mut self, access: &Access) {
-		match access.command {
-			Command::Get => {
-				self.get(access);
-			},
-
-			Command::Set => {
-				self.set(access);
-			},
-		}
-	}
-
+	/// Performs a get request on the cache.
 	fn get(&mut self, access: &Access) -> bool {
 		if access.size as u64 > self.size() {
 			return false;
@@ -62,6 +58,7 @@ pub trait Cache: Send + Sync {
 		false
 	}
 
+	/// Performs a set request on the cache.
 	fn set(&mut self, access: &Access) {
 		if access.size as u64 > self.size() {
 			return;
@@ -70,10 +67,13 @@ pub trait Cache: Send + Sync {
 		self.process_set(access);
 	}
 
+	/// Performs a del request on the cache.
 	fn del(&mut self, key: Key) {
 		self.process_del(key);
 	}
 
+	/// Returns `true` if the cache has an object with
+	/// the supplied key.
 	fn has(&self, key: Key) -> bool {
 		self.process_has(key)
 	}

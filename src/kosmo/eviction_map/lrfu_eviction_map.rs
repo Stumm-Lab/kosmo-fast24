@@ -64,7 +64,7 @@ impl EvictionMap for LrfuEvictionMap {
 		self.map.iter_mut().for_each(|record| record.update(self.timestamp, access, self.p, self.lambda));
 		self.timestamp = access.timestamp;
 
-		if !self.map.last().is_some_and(|record| record.size == 0) {
+		if self.map.last().is_none_or(|record| record.size != 0) {
 			self.map.push(EvictionRecord::new(0, f(self.p, self.lambda, 0)));
 		}
 	}
@@ -152,7 +152,7 @@ mod tests {
 			command: Command::Get,
 			key: 0,
 			size: 1,
-			ttl: 0,
+			ttl: None,
 		};
 
 		let mut eviction_map = LrfuEvictionMap::new(&access, 2.0, 0.5);

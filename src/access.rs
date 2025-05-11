@@ -5,13 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use std::io::{Cursor, Error, ErrorKind};
+use std::io::{self, Cursor};
 use byteorder::{LittleEndian, ReadBytesExt};
-
-use kwik::{
-	binary_reader::{SizedChunk, Chunk as ReadChunk},
-	binary_writer::Chunk as WriteChunk,
-};
+use kwik::file::binary::{SizedChunk, ReadChunk, WriteChunk};
 
 pub type Timestamp = u64;
 pub type Key = u64;
@@ -24,61 +20,44 @@ pub enum Command {
 	Set,
 }
 
+/// An individual access in a cache access trace.
 #[derive(Debug, Clone)]
 pub struct Access {
 	pub timestamp: Timestamp,
 	pub command: Command,
 	pub key: Key,
 	pub size: Size,
-	pub ttl: Ttl,
+	pub ttl: Option<Ttl>,
 }
 
 impl Access {
+	/// Returns `true` if the access is a GET and has a non-zero size.
 	pub fn is_valid_self_populating(&self) -> bool {
 		self.command == Command::Get && self.size > 0
 	}
 }
 
 impl SizedChunk for Access {
-	const SIZE: usize = 25;
+	fn chunk_size() -> usize {
+		25
+	}
 }
 
 impl ReadChunk for Access {
-	fn new(buf: &[u8; Self::SIZE]) -> Result<Self, Error> where Self: Sized {
+	fn from_chunk(buf: &[u8]) -> io::Result<Self> {
 		let mut rdr = Cursor::new(buf);
 
-		let Ok(timestamp) = rdr.read_u64::<LittleEndian>() else {
-			return Err(Error::new(ErrorKind::InvalidData, "Invalid access timestamp."));
-		};
+		let timestamp = rdr.read_u64::<LittleEndian>()?;
 
-		let command = match rdr.read_u8() {
-			Ok(byte) => Command::from_byte(byte)?,
+		let command_byte = rdr.read_u8()?;
+		let command = Command::from_byte(command_byte)?;
 
-			Err(_) => return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Invalid access command."
-			)),
-		};
+		let key = rdr.read_u64::<LittleEndian>()?;
+		let size = rdr.read_u32::<LittleEndian>()?;
 
-		let Ok(key) = rdr.read_u64::<LittleEndian>() else {
-			return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Invalid access key."
-			));
-		};
-
-		let Ok(size) = rdr.read_u32::<LittleEndian>() else {
-			return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Invalid access size."
-			));
-		};
-
-		let Ok(ttl) = rdr.read_u32::<LittleEndian>() else {
-			return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Invalid access ttl."
-			));
+		let ttl = match rdr.read_u32::<LittleEndian>()? {
+			0 => None,
+			value => Some(value),
 		};
 
 		let access = Access {
@@ -94,24 +73,27 @@ impl ReadChunk for Access {
 }
 
 impl WriteChunk for Access {
-	fn as_chunk(&self, buf: &mut Vec<u8>) -> Result<(), Error> {
+	fn as_chunk(&self, buf: &mut Vec<u8>) -> io::Result<()> {
 		buf.extend_from_slice(&self.timestamp.to_le_bytes());
 		buf.extend_from_slice(&self.command.as_byte().to_le_bytes());
 		buf.extend_from_slice(&self.key.to_le_bytes());
 		buf.extend_from_slice(&self.size.to_le_bytes());
-		buf.extend_from_slice(&self.ttl.to_le_bytes());
+		buf.extend_from_slice(&self.ttl.unwrap_or(0).to_le_bytes());
 
 		Ok(())
 	}
 }
 
 impl Command {
-	fn from_byte(byte: u8) -> Result<Self, Error> {
+	fn from_byte(byte: u8) -> io::Result<Self> {
 		match byte {
 			0 => Ok(Command::Get),
 			1 => Ok(Command::Set),
 
-			_ => Err(Error::new(ErrorKind::InvalidData, "Invalid command byte.")),
+			_ => Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				"Invalid command byte.",
+			)),
 		}
 	}
 
